@@ -1,154 +1,184 @@
-//берем кнопку
-let newGameButton = document.getElementById('game');
+/* ===== Game3.2 / app.js (fix) =====
+   Ожидается HTML:
+   <div id="board" class="board"></div>
+   <div class="hud">
+     <button id="newGame">Новая игра</button>
+     <span id="moves">Ходы: 0</span>
+     <span id="time">Время: 00:00</span>
+   </div>
+*/
 
-//флаг для определения очередности нажатия кнопки
-let newButtonClicked = true;
+(() => {
+  const N = 4;
+  const board = document.getElementById('board');
+  const newGameBtn = document.getElementById('newGame');
+  const movesEl = document.getElementById('moves');
+  const timeEl  = document.getElementById('time');
 
-//событие при клике на кнопку
-newGameButton.onclick = start;
+  let state = goal();
+  let moves = 0;
+  let seconds = 0;
+  let timerId = null;
 
-//счетчик шагов
-let moveCounter = 0;
-let gameTime = 0;
+  function goal(){ return [...Array(15).keys()].map(n => n + 1).concat(0); }
+  function indexToRC(i){ return { r: Math.floor(i/N), c: i%N }; }
+  function rcToIndex(r,c){ return r*N + c; }
 
-//срабатывает при нажатии на кнопку новой игры
-function start() {
-    let dif = 4;
-    // let dif = document.querySelector('[name="game-difficulty"]:checked').value;
-    if (newButtonClicked) {
-        startGame(dif);
-        field.style.display = "block";
-        startResults();
-        newButtonClicked = false; //меняется значение флага
-        newGameButton.innerHTML = "Заново";
-        
-        //difficulty.style.display = "none";
-        result.style.display = "block";
-        //window.location.reload();
-    } else {
-        window.location.reload(); //перезагрузит страницу
+  function isSolvable(a){
+    const tiles = a.filter(x => x !== 0);
+    let inv = 0;
+    for (let i=0;i<tiles.length-1;i++){
+      for (let j=i+1;j<tiles.length;j++){
+        if (tiles[i] > tiles[j]) inv++;
+      }
     }
-}
+    const blankIdx = a.indexOf(0);
+    const blankRowFromTop = Math.floor(blankIdx / N);
+    const blankRowFromBottom = N - blankRowFromTop;
+    return ((inv + blankRowFromBottom) % 2) === 1;
+  }
 
-function startGame(dif) {
-    //ищем field
-    const field = document.querySelector('.field');
+  function shuffleSolvable(){
+    const a = goal();
+    do {
+      for (let i=a.length-1;i>0;i--){
+        const k = Math.floor(Math.random()*(i+1));
+        [a[i], a[k]] = [a[k], a[i]];
+      }
+    } while (!isSolvable(a) || isTriviallySolved(a));
+    return a;
+  }
 
-    //размер ячейки
-    const cellSize = 100;
-    //складываем инфу о ячейках в массив
-    const cells = [];
-    //создаем и сортируем массив с числами
-    // const numbers = [...Array(dif * dif - 1).keys()].sort(() => Math.random() - 0.5);
-    const numbers = [2, 3, 5, 6, 7, 1, 13, 9, 10, 0, 12, 8, 14, 4, 11]
-    for (let i = 0; i <= dif * dif - 2; i++) {
-        //создаем тег
-        const cell = document.createElement('div');
-        const value = numbers[i] + 1;
-        cell.className = 'cell';
-        cell.classList.add('cell'+ value);
-        //записываем в ячейку значение
-        cell.innerHTML = value;
+  function isTriviallySolved(a){
+    for (let i=0;i<16;i++) if (a[i] !== goal()[i]) return false;
+    return true;
+  }
 
-        //позиция в строке
-        const left = i % dif;
-        //позиция в столбце
-        const top = (i - left) / dif;
+  function canSwap(i,j){
+    const A=indexToRC(i), B=indexToRC(j);
+    return Math.abs(A.r-B.r)+Math.abs(A.c-B.c)===1;
+  }
 
-        //записываем ячейку в массив
-        cells.push({
-            value: value,
-            left: left,
-            top: top,
-            element: cell
-        });
+  function fmt(t){
+    const m = Math.floor(t/60).toString().padStart(2,'0');
+    const s = (t%60).toString().padStart(2,'0');
+    return `${m}:${s}`;
+  }
 
-        //сдвигаем координаты
-        cell.style.left = `${left * cellSize}px`;
-        cell.style.top = `${top * cellSize}px`;
+  function startTimer(){
+    stopTimer();
+    seconds = 0;
+    timerId = setInterval(()=>{
+      seconds++;
+      timeEl && (timeEl.textContent = `Время: ${fmt(seconds)}`);
+    }, 1000);
+  }
+  function stopTimer(){
+    if (timerId) { clearInterval(timerId); timerId = null; }
+  }
 
-        //добавляем ячейку в поле field
-        field.append(cell);
+  function render(){
+    board.innerHTML = '';
+    state.forEach((n,i)=>{
+      const {r,c} = indexToRC(i);
+      const el = document.createElement('button');
+      el.className = n===0 ? 'tile empty' : 'tile';
+      el.style.gridRow = (r+1);
+      el.style.gridColumn = (c+1);
+      el.dataset.i = i;
+      el.textContent = n===0 ? '' : n;
+      el.addEventListener('click', onTileClick);
+      addTouchHandlers(el);
+      board.appendChild(el);
+    });
+    movesEl && (movesEl.textContent = `Ходы: ${moves}`);
+    timeEl  && (timeEl.textContent  = `Время: ${fmt(seconds)}`);
+  }
 
-        //при обработчике события срабатывает функция
-        cell.addEventListener('click', () => {
-            move(i);
-        })
-    }
+  function onTileClick(e){
+    const i = Number(e.currentTarget.dataset.i);
+    moveAt(i, true);
+  }
 
-    //координаты пустой ячейки
-    const empty = {
-        value: dif * dif,
-        top: dif - 1,
-        left: dif - 1,
-    }
-    //заносим пустую ячейку в массив
-    cells.push(empty);
+  function animateSwap(i, blank){
+    const tiles = board.querySelectorAll('.tile');
+    const a = board.querySelector(`.tile[data-i="${i}"]`);
+    const b = board.querySelector(`.tile[data-i="${blank}"]`);
+    if (!a || !b) return;
+    a.classList.add('swap');
+    b.classList.add('swap');
+    setTimeout(()=>{ a.classList.remove('swap'); b.classList.remove('swap'); }, 150);
+  }
 
+  function moveAt(i, withAnim=false){
+    const blank = state.indexOf(0);
+    if (!canSwap(i, blank)) return;
+    if (withAnim) animateSwap(i, blank);
+    [state[i], state[blank]] = [state[blank], state[i]];
+    moves++;
+    render();
+    checkWin();
+  }
 
-    function move(index) {
-        //достаем ячейку
-        const cell = cells[index];
+  function checkWin(){
+    for (let i=0;i<15;i++) if (state[i]!==i+1) return;
+    if (state[15]!==0) return;
+    stopTimer();
+    board.classList.add('won');
+    // alert(`Собрано за ${fmt(seconds)} с ${moves} ходами`);
+  }
 
-        //берем разницу по координате
-        const leftDiff = Math.abs(empty.left - cell.left);
-        const topDiff = Math.abs(empty.top - cell.top);
-
-        //если разница больше одного, то ячейка не является соседней
-        if (leftDiff + topDiff > 1) {
-            return;
+  // Тач-жест: свайп по пустой не нужен; по плитке — двигаем если рядом пустота.
+  function addTouchHandlers(el){
+    let sx=0, sy=0;
+    el.addEventListener('touchstart', (e)=>{
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY;
+    }, {passive:true});
+    el.addEventListener('touchend', (e)=>{
+      const dx = (e.changedTouches[0].clientX - sx);
+      const dy = (e.changedTouches[0].clientY - sy);
+      const i = Number(el.dataset.i);
+      const blank = state.indexOf(0);
+      const {r,c} = indexToRC(i);
+      // Жесты нестрогие: определяем главный вектор
+      if (Math.abs(dx) > Math.abs(dy)) {
+        // горизонт
+        if (dx > 20) {
+          // свайп вправо: значит плитка идёт вправо → пустая должна быть справа
+          const j = rcToIndex(r, c+1);
+          if (j === blank) moveAt(i, true);
+        } else if (dx < -20) {
+          // влево
+          const j = rcToIndex(r, c-1);
+          if (j === blank) moveAt(i, true);
         }
-        moveCounter++;
-        //перемещаемся на прошлую ячейку
-        cell.element.style.left = `${empty.left * cellSize}px`;
-        cell.element.style.top = `${empty.top * cellSize}px`;
-
-        //координаты пустой клетки
-        const emptyLeft = empty.left;
-        const emptyTop = empty.top;
-
-        //записываем координаты текущей ячейки
-        empty.left = cell.left;
-        empty.top = cell.top;
-
-        //в ячейку передаем записанные значения
-        cell.left = emptyLeft;
-        cell.top = emptyTop;
-
-        //метод every проверяет условие для каждого элемента
-        const isFinished = cells.every(cell => {
-            //проверка на правильную координату
-            return cell.value === cell.top * dif + cell.left + 1;
-        });
-
-        if (isFinished) {
-            setTimeout(function(){
-                alert('Вы прошли игру за '+ moveCounter + ' шагов');
-                //window.location.reload();
-            }, 500)
+      } else {
+        // вертикаль
+        if (dy > 20) {
+          // вниз
+          const j = rcToIndex(r+1, c);
+          if (j === blank) moveAt(i, true);
+        } else if (dy < -20) {
+          // вверх
+          const j = rcToIndex(r-1, c);
+          if (j === blank) moveAt(i, true);
         }
-    }
+      }
+    }, {passive:true});
+  }
 
-}
+  function newGame(){
+    state = shuffleSolvable();
+    moves = 0;
+    board.classList.remove('won');
+    render();
+    startTimer();
+  }
 
-//результаты
-function startResults() {
-    const moveContainer = document.querySelector('.move-text');
-    //const timeContainer = document.querySelector('.time-text');
-    moveContainer.innerHTML = '' + moveCounter;
-    // timeContainer.innerHTML = '' + gameTime;
-    //обновляем контейнер шагов
-    const movesUpdate = setInterval(
-        () => {
-            moveContainer.innerHTML = '' + moveCounter;
-        },
-        100);
-    //обновляем контейнер времени
-    // const gameInterval = setInterval(
-    //     () => {
-    //         timeContainer.innerHTML = '' + ++gameTime;
-    //     },
-    //     1000);
-}
+  newGameBtn && newGameBtn.addEventListener('click', newGame);
 
-
+  // Старт
+  render();
+  newGame();
+})();
